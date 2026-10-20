@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <title>TIE: Training-free CLIP Embedding Guidance for Compositional Text-to-Image Alignment</title>
+  <meta name="description" content="TIE is a training-free, inference-time text-embedding update that fixes concept loss and concept confusion in CLIP-based text-to-image diffusion models." />
+  <meta name="keywords" content="text-to-image, diffusion, CLIP, compositional generation, training-free, embedding, Stable Diffusion, SDXL" />
+
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="TIE: Training-free CLIP Embedding Guidance for Compositional Text-to-Image Alignment" />
+  <meta property="og:description" content="A single-step, training-free embedding update that resolves concept loss and concept confusion in CLIP-based T2I diffusion models." />
+  <meta property="og:image" content="static/images/fig1_final.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- KaTeX for equation rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+          colors: {
+            paper: {
+              50:  '#ffffff',
+              100: '#fafafa',
+              200: '#f5f5f7',
+              300: '#eceef2',
+            },
+          },
+          boxShadow: {
+            soft: '0 10px 40px -20px rgba(79,70,229,0.25), 0 2px 8px -2px rgba(15,23,42,0.08)',
+            'soft-sm': '0 4px 20px -8px rgba(79,70,229,0.18), 0 1px 3px -1px rgba(15,23,42,0.06)',
+          },
+          keyframes: {
+            'float-slow': {
+              '0%,100%': { transform: 'translateY(0)' },
+              '50%':     { transform: 'translateY(-10px)' },
+            },
+          },
+          animation: {
+            'float-slow': 'float-slow 9s ease-in-out infinite',
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    html { scroll-behavior: smooth; }
+    body {
+      background-color: #ffffff;
+      color: #0f172a;
+      font-family: 'Inter', system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* soft dotted grid */
+    .bg-dots {
+      background-image: radial-gradient(rgba(15,23,42,0.07) 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+    /* radial illumination behind hero (light) */
+    .hero-illum::before {
+      content: "";
+      position: absolute;
+      inset: -20% -10% auto -10%;
+      height: 120%;
+      background:
+        radial-gradient(60% 50% at 50% 0%,  rgba(99,102,241,0.14) 0%, rgba(99,102,241,0.0) 60%),
+        radial-gradient(40% 30% at 72% 20%, rgba(139,92,246,0.10) 0%, rgba(139,92,246,0.0) 60%),
+        radial-gradient(35% 25% at 20% 30%, rgba(56,189,248,0.10) 0%, rgba(56,189,248,0.0) 60%);
+      filter: blur(30px);
+      z-index: 0;
+      pointer-events: none;
+    }
+    /* thin indigo gradient divider */
+    .divider-glow {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(99,102,241,0.45), transparent);
+    }
+    /* gradient title text */
+    .text-gradient {
+      background: linear-gradient(180deg, #0f172a 0%, #312e81 60%, #4338ca 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    /* card: white with soft indigo border + shadow */
+    .soft-card {
+      background: #ffffff;
+      border: 1px solid rgba(99,102,241,0.14);
+      box-shadow: 0 10px 40px -24px rgba(79,70,229,0.22), 0 2px 8px -2px rgba(15,23,42,0.05);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .soft-card:hover {
+      border-color: rgba(99,102,241,0.35);
+      box-shadow: 0 14px 50px -22px rgba(79,70,229,0.28), 0 3px 10px -2px rgba(15,23,42,0.07);
+    }
+    /* primary button */
+    .btn-primary {
+      background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+      color: #ffffff;
+      box-shadow: 0 10px 24px -10px rgba(79,70,229,0.55), inset 0 1px 0 rgba(255,255,255,0.25);
+    }
+    .btn-primary:hover { filter: brightness(1.06); }
+    /* ghost button (light) */
+    .btn-ghost {
+      background: #ffffff;
+      border: 1px solid rgba(15,23,42,0.12);
+      color: #1e293b;
+    }
+    .btn-ghost:hover {
+      border-color: rgba(99,102,241,0.5);
+      color: #0f172a;
+      background: #f8fafc;
+    }
+    /* pill */
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .pill-lg {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 18px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    /* code block (light) */
+    pre.code {
+      background: #0f172a;
+      border: 1px solid rgba(99,102,241,0.25);
+      border-radius: 12px;
+      padding: 18px 20px;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 13px;
+      color: #e2e8f0;
+      overflow-x: auto;
+    }
+    /* scroll reveal — only applied by JS after it confirms IO is supported;
+       default state must stay fully visible so content works without JS */
+    .js-reveal {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+      will-change: opacity, transform;
+    }
+    .js-reveal.is-visible { opacity: 1; transform: translateY(0); }
+    @media (prefers-reduced-motion: reduce) {
+      .js-reveal { opacity: 1; transform: none; transition: none; }
+    }
+    /* table cell helpers */
+    .tbl th, .tbl td { padding: 10px 12px; }
+    .tbl thead th { font-weight: 600; color: #334155; }
+    .tbl tbody tr { border-bottom: 1px solid rgba(15,23,42,0.06); }
+    .tbl tbody tr:last-child { border-bottom: 0; }
+    .tbl .row-ours { background: rgba(99,102,241,0.055); }
+    .tbl .row-ours td { color: #0f172a; }
+    .tbl .cell-best { color: #4338ca; font-weight: 600; }
+  </style>
+</head>
+
+<body>
+
+  <!-- ===== Navigation ===== -->
+  <header class="fixed top-0 inset-x-0 z-40 backdrop-blur-md bg-white/80 border-b border-slate-200/70">
+    <div class="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+      <a href="#top" class="flex items-center gap-2 group">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+        <span class="text-sm font-semibold tracking-wide text-slate-900 group-hover:text-indigo-700">TIE</span>
+      </a>
+      <nav class="hidden md:flex items-center gap-7 text-sm text-slate-600">
+        <a href="#abstract" class="hover:text-indigo-700">Abstract</a>
+        <a href="#analysis" class="hover:text-indigo-700">Analysis</a>
+        <a href="#method"   class="hover:text-indigo-700">Method</a>
+        <a href="#results"  class="hover:text-indigo-700">Results</a>
+        <a href="#bibtex"   class="hover:text-indigo-700">BibTeX</a>
+      </nav>
+      <a href="https://github.com/hong-sujung/TIE" target="_blank" rel="noopener"
+         class="text-xs font-semibold px-3 py-1.5 rounded-md btn-ghost">
+        Code&nbsp;↗
+      </a>
+    </div>
+  </header>
+
+  <!-- ===== Hero ===== -->
+  <section id="top" class="relative hero-illum overflow-hidden">
+    <div class="absolute inset-0 bg-dots opacity-70"></div>
+    <div class="relative max-w-5xl mx-auto px-6 pt-36 pb-14 text-center">
+
+      <h1 class="text-gradient font-extrabold tracking-tight text-3xl sm:text-4xl md:text-5xl" style="line-height: 1.18;">
+        TIE: Training-free CLIP Embedding Guidance<br />
+        <span class="text-slate-900">for Compositional Text-to-Image Alignment</span>
+      </h1>
+
+      <p class="mt-7 text-base sm:text-[15.5px] text-slate-600 max-w-3xl mx-auto">
+        A single-step, training-free text-embedding update that resolves
+        <span class="text-indigo-600 font-semibold">concept loss</span> and
+        <span class="text-indigo-600 font-semibold">concept confusion</span>
+        in CLIP-based text-to-image diffusion models — guided by two internal signals of the CLIP text encoder:
+        token entropy and L0 attention.
+      </p>
+
+      <!-- Authors -->
+      <div class="mt-9 text-sm sm:text-base text-slate-700">
+        <div class="flex flex-wrap justify-center items-baseline gap-x-5 gap-y-1">
+          <span class="text-slate-900">Sujung Hong<sup class="text-indigo-600">∗</sup></span>
+          <span class="text-slate-900">Ta Eun Choi<sup class="text-indigo-600">∗</sup></span>
+          <span class="text-slate-900">Youngjun Jun</span>
+          <span class="text-slate-900">Chanyong Yoon</span>
+          <span class="text-slate-900">Seong Jae Hwang<sup class="text-indigo-600">†</sup></span>
+        </div>
+        <div class="mt-3 text-slate-500 text-sm">
+          Yonsei University
+        </div>
+        <div class="mt-2 text-slate-500 text-[11px] tracking-[0.18em] uppercase">
+          <sup class="text-indigo-600">∗</sup>&nbsp;Equal contribution
+          &nbsp;·&nbsp;
+          <sup class="text-indigo-600">†</sup>&nbsp;Corresponding author
+        </div>
+      </div>
+
+      <!-- Buttons -->
+      <div class="mt-9 flex flex-wrap justify-center gap-3">
+        <a href="static/pdfs/TIE_main.pdf" target="_blank" rel="noopener"
+           class="btn-primary font-semibold rounded-lg px-5 py-2.5 text-sm inline-flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/></svg>
+          Paper
+        </a>
+        <a href="static/pdfs/TIE_supplementary.pdf" target="_blank" rel="noopener"
+           class="btn-ghost font-semibold rounded-lg px-5 py-2.5 text-sm inline-flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>
+          Supplementary
+        </a>
+        <a href="https://github.com/hong-sujung/TIE" target="_blank" rel="noopener"
+           class="btn-ghost font-semibold rounded-lg px-5 py-2.5 text-sm inline-flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.69 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.28-5.24-5.71 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.47.11-3.07 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.62 1.6.23 2.78.11 3.07.73.81 1.18 1.84 1.18 3.1 0 4.44-2.69 5.42-5.25 5.71.41.35.78 1.05.78 2.12v3.14c0 .31.21.67.79.56C20.21 21.38 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5Z"/></svg>
+          Code
+        </a>
+        <a href="#bibtex"
+           class="btn-ghost font-semibold rounded-lg px-5 py-2.5 text-sm inline-flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 12h.01M7 17h.01M11 7h6M11 12h6M11 17h6"/></svg>
+          BibTeX
+        </a>
+      </div>
+
+      <!-- Teaser figure -->
+      <div class="mt-14 relative">
+        <div class="absolute inset-x-10 -bottom-6 h-14 blur-2xl rounded-full bg-indigo-300/35"></div>
+        <div class="soft-card rounded-2xl p-3 sm:p-4 animate-float-slow">
+          <img src="static/images/fig1_final.png" alt="Teaser: SDXL vs. TIE on simple compositional prompts"
+               class="w-full rounded-xl block"/>
+        </div>
+        <p class="mt-4 text-xs text-slate-500 max-w-3xl mx-auto">
+          <span class="font-semibold text-slate-700">Figure&nbsp;1.</span>
+          Failure cases in simple prompts. SDXL exhibits
+          <span class="text-slate-700 font-medium">concept loss</span>
+          (missing attribute / missing object) and
+          <span class="text-slate-700 font-medium">concept confusion</span>
+          (attribute misalignment / object mixture). TIE resolves both
+          by updating the text embedding in a single training-free step.
+        </p>
+      </div>
+
+    </div>
+    <div class="divider-glow"></div>
+  </section>
+
+  <!-- ===== Abstract ===== -->
+  <section id="abstract" class="relative py-20">
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="text-center mb-10">
+        <span class="pill-lg bg-indigo-50 text-indigo-700 border border-indigo-100">Abstract</span>
+      </div>
+      <div class="soft-card rounded-2xl p-8 sm:p-10 text-slate-700 leading-relaxed text-[15.5px]">
+        <p>
+          Text-to-image (T2I) diffusion models have advanced notably, but still fail to satisfy prompt
+          conditions, resulting in attribute mismatches and missing objects. These errors normally fall
+          into two categories:
+          <span class="text-slate-900 font-medium">concept loss</span>, when an object or attribute goes
+          missing, and
+          <span class="text-slate-900 font-medium">concept confusion</span>, when an attribute is
+          assigned to the wrong object or multiple objects blend together. Recent studies suggest these
+          challenges are caused by the limited capacity of the CLIP text encoder to capture fine-grained
+          semantic details.
+        </p>
+        <p class="mt-4">
+          We conduct an embedding-level analysis and develop a training-free, inference-time solution
+          for both failure modes. We find that
+          (1)&nbsp;concepts mentioned later exhibit higher
+          <span class="text-indigo-700 font-semibold">embedding entropy</span>,
+          reflecting less concentrated representations more often associated with concept loss, and
+          (2)&nbsp;the <span class="text-indigo-700 font-semibold">first CLIP attention layer</span>
+          captures the strength of binding between each object and its attribute.
+        </p>
+        <p class="mt-4">
+          Guided by these findings, we introduce <span class="text-indigo-700 font-semibold">TIE</span>,
+          a method that improves semantic alignment through a single text-embedding update. TIE
+          addresses concept loss via entropy-aware singular value amplification and resolves concept
+          confusion through interpolation–extrapolation binding based on CLIP attention scores — all in
+          a training-free manner. Extensive experiments show that TIE enhances semantic fidelity in
+          multi-concept scenarios with minimal sampling overhead.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Analysis ===== -->
+  <section id="analysis" class="relative py-20 border-t border-slate-200/70">
+    <div class="absolute inset-x-0 top-0 h-px divider-glow"></div>
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-14">
+        <span class="pill-lg bg-indigo-50 text-indigo-700 border border-indigo-100">Analysis</span>
+        <h2 class="mt-5 text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 tracking-tight">
+          Where do CLIP-based T2I models fail?
+        </h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto">
+          Before fixing anything, we identify two internal signals of the CLIP text encoder that explain
+          concept loss and concept confusion.
+        </p>
+      </div>
+
+      <!-- Finding 1 : Token Entropy -->
+      <div class="soft-card rounded-2xl p-6 sm:p-8 mb-8">
+        <div class="flex items-center gap-3 mb-5 flex-wrap">
+          <span class="pill bg-rose-50 text-rose-700 border border-rose-100">Finding&nbsp;1</span>
+          <h3 class="text-xl sm:text-2xl font-semibold text-slate-900">
+            Later-mentioned concepts have higher token entropy — a proxy for concept loss
+          </h3>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4">
+          <img src="static/images/fig2_final.png" alt="Figure 2 — positional bias and token entropy"
+               class="w-full rounded-lg block"/>
+          <p class="text-center text-xs text-slate-500 mt-4 leading-relaxed max-w-4xl mx-auto">
+            <span class="font-semibold text-slate-700">Figure&nbsp;2.</span>
+            (a) The later attribute–object pair is far more prone to being missing or misaligned.
+            (b) Later-position tokens consistently show higher normalized entropy, regardless of the
+            vocabulary itself. (c) Across aligned / misaligned / missing cases, higher token entropy
+            coincides with concept loss.
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-6 mt-6 text-slate-700 text-sm leading-relaxed">
+          <div class="space-y-3">
+            <p>
+              Previous work observed a positional bias in which later-mentioned
+              <span class="text-slate-900 font-medium">objects</span> are more likely to disappear.
+              We find the same holds for <span class="text-slate-900 font-medium">attributes</span>.
+            </p>
+            <p>
+              At the embedding level, this bias is captured by
+              <span class="text-indigo-700 font-semibold">normalized token entropy</span> —
+              a scale-invariant measure that increases as a token's representation spreads across
+              more coordinates, strongly correlating with CLIP's shared anisotropic direction.
+            </p>
+            <p class="text-slate-500">
+              This motivates <span class="text-indigo-700 font-semibold">Adaptive Embedding
+              Preservation (AEP)</span>: amplify concept tokens adaptively, in proportion to their entropy.
+            </p>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 flex items-center justify-center text-[13px] text-slate-700 overflow-x-auto">
+            $p_{i,j} = \frac{|c_{i,j}|}{\sum_{k=1}^{d}|c_{i,k}|}, \quad \mathcal{H}_i = -\frac{1}{\log d}\sum_{j=1}^{d} p_{i,j}\log p_{i,j}$
+          </div>
+        </div>
+      </div>
+
+      <!-- Finding 2 : L0 Attention -->
+      <div class="soft-card rounded-2xl p-6 sm:p-8">
+        <div class="flex items-center gap-3 mb-5 flex-wrap">
+          <span class="pill bg-rose-50 text-rose-700 border border-rose-100">Finding&nbsp;2</span>
+          <h3 class="text-xl sm:text-2xl font-semibold text-slate-900">
+            L0 attention is a continuous signal of attribute–object binding
+          </h3>
+        </div>
+
+        <div class="rounded-xl border border-slate-200 bg-white p-4">
+          <img src="static/images/fig3_final.png" alt="Figure 3 — L0 attention and attribute-object binding"
+               class="w-full rounded-lg block"/>
+          <p class="text-center text-xs text-slate-500 mt-4 leading-relaxed max-w-4xl mx-auto">
+            <span class="font-semibold text-slate-700">Figure&nbsp;3.</span>
+            (a) Masking an attribute at L0 is especially damaging; later layers much less so.
+            (b) Final-embedding similarity/distance overlap for related vs. unrelated pairs.
+            (c) L0 attention cleanly separates relationships and predicts rendering quality.
+          </p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-6 mt-6 text-slate-700 text-sm leading-relaxed">
+          <p>
+            The <span class="text-slate-900 font-medium">first self-attention layer (L0)</span>
+            of the CLIP text encoder has an outsized role: masking an attribute at L0 removes it
+            from the generated image, while masking it at later layers barely changes the output.
+          </p>
+          <p>
+            Conventional embedding metrics (cosine / L2) cannot separate related from unrelated
+            attribute–object pairs. L0 attention instead gives a
+            <span class="text-slate-900 font-medium">continuous</span>, distance-controlled binding signal.
+          </p>
+          <p class="text-slate-500">
+            This motivates <span class="text-indigo-700 font-semibold">Interpolation–Extrapolation
+            Binding (IEB)</span>: tighten correct bindings and push apart incorrect ones, with the
+            step size driven by L0 attention.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Method ===== -->
+  <section id="method" class="relative py-20 border-t border-slate-200/70">
+    <div class="absolute inset-x-0 top-0 h-px divider-glow"></div>
+    <div class="max-w-6xl mx-auto px-6">
+
+      <div class="text-center mb-14">
+        <span class="pill-lg bg-indigo-50 text-indigo-700 border border-indigo-100">Method</span>
+        <h2 class="mt-5 text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 tracking-tight">
+          A single training-free embedding update
+        </h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto">
+          TIE combines two complementary components — AEP and IEB — into one text-embedding update,
+          plug-and-play across CLIP-based T2I models with minimal inference overhead.
+        </p>
+      </div>
+
+      <!-- Pipeline overview -->
+      <div class="soft-card rounded-2xl p-4 sm:p-6 mb-14">
+        <img src="static/images/fig4_pipeline.png" alt="TIE method pipeline"
+             class="w-full rounded-xl block"/>
+        <p class="text-center text-xs text-slate-500 mt-4 leading-relaxed">
+          <span class="font-semibold text-slate-700">Figure&nbsp;4.</span>
+          End-to-end TIE pipeline. Adaptive Embedding Preservation (AEP) amplifies concept tokens
+          according to their entropy; Interpolation–Extrapolation Binding (IEB) adjusts attribute–object
+          pairs using L0 attention. All operations are applied once to the text embedding.
+        </p>
+      </div>
+
+      <!-- Two-column method cards -->
+      <div class="grid md:grid-cols-2 gap-6">
+
+        <!-- AEP -->
+        <div class="soft-card rounded-2xl p-7">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18M5 8h14M5 16h14"/></svg>
+            </div>
+            <h3 class="text-lg font-semibold text-slate-900">Adaptive Embedding Preservation (AEP)</h3>
+          </div>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            Concepts with higher token entropy are more prone to being lost. AEP amplifies each
+            concept-token embedding using an
+            <span class="text-slate-900 font-medium">entropy-aware singular value scaling</span>
+            of its SVD, jointly with the end-of-text (EOT) tokens that are known to carry
+            additional compositional signal. Preserving stronger per-concept representations
+            prevents objects and attributes from being dropped during denoising.
+          </p>
+          <div class="mt-5 flex flex-wrap gap-2 text-[11px] text-slate-500">
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">Entropy-aware SVD</span>
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">Per-concept scaling</span>
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">Joint with EOT</span>
+          </div>
+        </div>
+
+        <!-- IEB -->
+        <div class="soft-card rounded-2xl p-7">
+          <div class="flex items-center gap-3 mb-3">
+            <div class="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12h12M6 12l4-4m-4 4l4 4m8-4l-4-4m4 4l-4 4"/></svg>
+            </div>
+            <h3 class="text-lg font-semibold text-slate-900">Interpolation–Extrapolation Binding (IEB)</h3>
+          </div>
+          <p class="text-slate-600 text-sm leading-relaxed">
+            Using L0 attention scores as a continuous binding signal, IEB
+            <span class="text-slate-900 font-medium">interpolates</span>
+            each attribute toward its correct object (strengthening correct bindings) and
+            <span class="text-slate-900 font-medium">extrapolates</span>
+            it away from incorrect ones (suppressing cross-concept leakage). The step size is adaptive
+            — larger when the L0 signal indicates weak binding, smaller when it is already strong.
+          </p>
+          <div class="mt-5 flex flex-wrap gap-2 text-[11px] text-slate-500">
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">L0 attention-driven</span>
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">Correct ↔ incorrect pairs</span>
+            <span class="px-2 py-0.5 rounded bg-slate-50 border border-slate-200">Adaptive step</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== Results ===== -->
+  <section id="results" class="relative py-20 border-t border-slate-200/70">
+    <div class="absolute inset-x-0 top-0 h-px divider-glow"></div>
+    <div class="max-w-6xl mx-auto px-6">
+      <div class="text-center mb-14">
+        <span class="pill-lg bg-indigo-50 text-indigo-700 border border-indigo-100">Results</span>
+        <h2 class="mt-5 text-3xl sm:text-4xl md:text-5xl font-bold text-slate-900 tracking-tight">
+          Better compositional fidelity, almost free
+        </h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto">
+          Consistent gains across T2I-CompBench and CC-500 for both SD1.4 and SDXL, with
+          inference time comparable to the base model.
+        </p>
+      </div>
+
+      <!-- Table: SDXL + CC-500 -->
+      <div class="soft-card rounded-2xl p-6 sm:p-8 mb-10 overflow-x-auto">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h3 class="text-lg font-semibold text-slate-900">T2I-CompBench + CC-500 on SDXL</h3>
+          <span class="pill bg-indigo-50 text-indigo-700 border border-indigo-100">quantitative</span>
+        </div>
+        <table class="tbl w-full text-sm text-left border-collapse">
+          <thead class="text-slate-600">
+            <tr class="border-b border-slate-200">
+              <th class="font-semibold">Method</th>
+              <th class="text-center font-semibold">Opt-free</th>
+              <th class="text-center font-semibold" colspan="3">BLIP-VQA ↑</th>
+              <th class="text-center font-semibold">VQA Score ↑</th>
+              <th class="text-center font-semibold" colspan="2">NoctOwl ↑</th>
+              <th class="text-center font-semibold">Time (s) ↓</th>
+            </tr>
+            <tr class="text-xs text-slate-500 border-b border-slate-200">
+              <th></th>
+              <th></th>
+              <th class="text-center font-normal">Color</th>
+              <th class="text-center font-normal">Shape</th>
+              <th class="text-center font-normal">Texture</th>
+              <th></th>
+              <th class="text-center font-normal">Det.</th>
+              <th class="text-center font-normal">Conf.</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-700">
+            <tr>
+              <td class="text-slate-500">SDXL</td>
+              <td class="text-center text-slate-400">—</td>
+              <td class="text-center">0.5940</td>
+              <td class="text-center">0.5068</td>
+              <td class="text-center">0.5961</td>
+              <td class="text-center">0.7695</td>
+              <td class="text-center">0.4134</td>
+              <td class="text-center">0.4287</td>
+              <td class="text-center">9.82</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">A&amp;E<sub>XL</sub></td>
+              <td class="text-center text-rose-500">✗</td>
+              <td class="text-center">0.5934</td>
+              <td class="text-center">0.5082</td>
+              <td class="text-center">0.6040</td>
+              <td class="text-center">0.7777</td>
+              <td class="text-center">0.5017</td>
+              <td class="text-center cell-best">0.4661</td>
+              <td class="text-center">62.72</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">SynGen<sub>XL</sub></td>
+              <td class="text-center text-rose-500">✗</td>
+              <td class="text-center">0.5948</td>
+              <td class="text-center">0.5059</td>
+              <td class="text-center">0.5955</td>
+              <td class="text-center">0.7724</td>
+              <td class="text-center">0.3970</td>
+              <td class="text-center">0.4196</td>
+              <td class="text-center">22.42</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">ToMe</td>
+              <td class="text-center text-rose-500">✗</td>
+              <td class="text-center">0.5161</td>
+              <td class="text-center">0.3551</td>
+              <td class="text-center">0.5621</td>
+              <td class="text-center">0.6439</td>
+              <td class="text-center">0.3519</td>
+              <td class="text-center">0.4135</td>
+              <td class="text-center">42.73</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">Magnet</td>
+              <td class="text-center text-emerald-600">✓</td>
+              <td class="text-center">0.6833</td>
+              <td class="text-center">0.5076</td>
+              <td class="text-center">0.5963</td>
+              <td class="text-center">0.7857</td>
+              <td class="text-center">0.5208</td>
+              <td class="text-center">0.4338</td>
+              <td class="text-center">10.66</td>
+            </tr>
+            <tr class="row-ours">
+              <td class="font-semibold text-indigo-700">TIE (Ours)</td>
+              <td class="text-center text-emerald-600 font-semibold">✓</td>
+              <td class="text-center cell-best">0.6852</td>
+              <td class="text-center cell-best">0.5392</td>
+              <td class="text-center cell-best">0.6454</td>
+              <td class="text-center cell-best">0.8021</td>
+              <td class="text-center cell-best">0.5372</td>
+              <td class="text-center">0.4376</td>
+              <td class="text-center">11.86</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-xs text-slate-500 mt-5">
+          TIE is <span class="text-slate-700 font-medium">optimization-free</span> and achieves the best BLIP-VQA across all three attribute types,
+          the highest VQA Score, and the best NoctOwl Detection — while adding only
+          <span class="text-slate-700 font-medium">~2 s</span> over the base SDXL.
+        </p>
+      </div>
+
+      <!-- Table: SD1.4 -->
+      <div class="soft-card rounded-2xl p-6 sm:p-8 mb-10 overflow-x-auto">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h3 class="text-lg font-semibold text-slate-900">T2I-CompBench on SD1.4</h3>
+          <span class="pill bg-indigo-50 text-indigo-700 border border-indigo-100">quantitative</span>
+        </div>
+        <table class="tbl w-full text-sm text-left border-collapse">
+          <thead class="text-slate-600">
+            <tr class="border-b border-slate-200">
+              <th class="font-semibold">Method</th>
+              <th class="text-center font-semibold">Opt-free</th>
+              <th class="text-center font-semibold">Color ↑</th>
+              <th class="text-center font-semibold">Shape ↑</th>
+              <th class="text-center font-semibold">Texture ↑</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-700">
+            <tr>
+              <td class="text-slate-500">SD1.4</td>
+              <td class="text-center text-slate-400">—</td>
+              <td class="text-center">0.3652</td>
+              <td class="text-center">0.3931</td>
+              <td class="text-center">0.4449</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">A&amp;E</td>
+              <td class="text-center text-rose-500">✗</td>
+              <td class="text-center">0.3806</td>
+              <td class="text-center">0.4168</td>
+              <td class="text-center">0.4776</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">SynGen</td>
+              <td class="text-center text-rose-500">✗</td>
+              <td class="text-center">0.3806</td>
+              <td class="text-center">0.4128</td>
+              <td class="text-center">0.4927</td>
+            </tr>
+            <tr>
+              <td class="text-slate-500">Magnet</td>
+              <td class="text-center text-emerald-600">✓</td>
+              <td class="text-center">0.4473</td>
+              <td class="text-center">0.4137</td>
+              <td class="text-center">0.4829</td>
+            </tr>
+            <tr class="row-ours">
+              <td class="font-semibold text-indigo-700">TIE (Ours)</td>
+              <td class="text-center text-emerald-600 font-semibold">✓</td>
+              <td class="text-center cell-best">0.4565</td>
+              <td class="text-center cell-best">0.4320</td>
+              <td class="text-center cell-best">0.4942</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Qualitative main -->
+      <div class="soft-card rounded-2xl p-4 sm:p-6 mb-10">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h3 class="text-lg font-semibold text-slate-900">Qualitative comparison on T2I-CompBench</h3>
+          <span class="pill bg-indigo-50 text-indigo-700 border border-indigo-100">qualitative</span>
+        </div>
+        <img src="static/images/fig5_qualitative.png" alt="Qualitative comparison figure"
+             class="w-full rounded-xl block"/>
+        <p class="text-center text-xs text-slate-500 mt-4 leading-relaxed">
+          <span class="font-semibold text-slate-700">Figure&nbsp;5.</span>
+          Qualitative comparison of TIE against training-free baselines. TIE preserves the full
+          attribute–object composition where baselines drop or swap concepts.
+        </p>
+      </div>
+
+      <!-- Ablation -->
+      <div class="soft-card rounded-2xl p-4 sm:p-6 mb-10">
+        <div class="flex items-center justify-between mb-5 flex-wrap gap-3">
+          <h3 class="text-lg font-semibold text-slate-900">Ablation: both components matter</h3>
+          <span class="pill bg-indigo-50 text-indigo-700 border border-indigo-100">ablation</span>
+        </div>
+        <img src="static/images/fig7_abalation2.png" alt="Ablation figure"
+             class="w-full rounded-xl block"/>
+        <p class="text-center text-xs text-slate-500 mt-4 leading-relaxed">
+          <span class="font-semibold text-slate-700">Figure&nbsp;7.</span>
+          AEP alone recovers lost concepts, IEB alone fixes mis-bindings; combining them gives the
+          most reliable compositional alignment.
+        </p>
+      </div>
+
+      <!-- Section divider -->
+      <div class="flex items-center gap-3 mb-6 mt-14">
+        <div class="h-px flex-1 bg-slate-200"></div>
+        <span class="text-xs uppercase tracking-widest text-slate-500">More qualitative examples</span>
+        <div class="h-px flex-1 bg-slate-200"></div>
+      </div>
+
+      <!-- Qualitative carousel -->
+      <div id="qual-carousel" class="relative">
+        <div class="overflow-hidden">
+          <div id="qual-track" class="flex transition-transform duration-500 ease-out">
+
+            <!-- Slide 1: SDXL extra qualitative -->
+            <div class="w-full flex-shrink-0 px-1">
+              <div class="soft-card rounded-2xl p-5 sm:p-7">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">SDXL — extended qualitative</h3>
+                  <span class="pill bg-slate-100 text-slate-700 border border-slate-200">SDXL</span>
+                </div>
+                <img src="static/images/ws_quali_xl.png" alt="SDXL extended qualitative"
+                     class="w-full rounded-xl block"/>
+                <p class="text-xs text-slate-500 mt-4 text-center">
+                  Baselines frequently drop or swap concepts; TIE renders both the correct objects and attributes together.
+                </p>
+              </div>
+            </div>
+
+            <!-- Slide 2: SD3.5 qualitative -->
+            <div class="w-full flex-shrink-0 px-1">
+              <div class="soft-card rounded-2xl p-5 sm:p-7">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">SD3.5 — extended qualitative</h3>
+                  <span class="pill bg-slate-100 text-slate-700 border border-slate-200">SD3.5</span>
+                </div>
+                <img src="static/images/ws_quali_35.png" alt="SD3.5 extended qualitative"
+                     class="w-full rounded-xl block"/>
+                <p class="text-xs text-slate-500 mt-4 text-center">
+                  TIE generalizes beyond the Stable Diffusion family — it works on CLIP-based variants out of the box.
+                </p>
+              </div>
+            </div>
+
+            <!-- Slide 3: Complex (SD3.5) -->
+            <div class="w-full flex-shrink-0 px-1">
+              <div class="soft-card rounded-2xl p-5 sm:p-7">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">Complex prompts (SD3.5)</h3>
+                  <span class="pill bg-slate-100 text-slate-700 border border-slate-200">complex</span>
+                </div>
+                <img src="static/images/ws_supp_35_complex.png" alt="Complex prompts qualitative"
+                     class="w-full rounded-xl block"/>
+                <p class="text-xs text-slate-500 mt-4 text-center">Longer multi-concept prompts on SD3.5.</p>
+              </div>
+            </div>
+
+            <!-- Slide 4: SDXL Complex -->
+            <div class="w-full flex-shrink-0 px-1">
+              <div class="soft-card rounded-2xl p-5 sm:p-7">
+                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+                  <h3 class="text-base sm:text-lg font-semibold text-slate-900">Complex prompts (SDXL)</h3>
+                  <span class="pill bg-slate-100 text-slate-700 border border-slate-200">SDXL · complex</span>
+                </div>
+                <img src="static/images/ws_supp_xl_complex.png" alt="SDXL complex qualitative"
+                     class="w-full rounded-xl block"/>
+                <p class="text-xs text-slate-500 mt-4 text-center">Longer multi-concept prompts on SDXL.</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Prev / Next -->
+        <button id="qual-prev" type="button"
+                class="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 w-10 h-10 rounded-full bg-white border border-slate-200 shadow-sm text-slate-600 hover:text-indigo-700 hover:border-indigo-300 flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Previous example">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button id="qual-next" type="button"
+                class="absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 w-10 h-10 rounded-full bg-white border border-slate-200 shadow-sm text-slate-600 hover:text-indigo-700 hover:border-indigo-300 flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
+                aria-label="Next example">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        </button>
+
+        <!-- Dots -->
+        <div id="qual-dots" class="flex justify-center gap-2 mt-6"></div>
+        <p id="qual-counter" class="text-center text-xs text-slate-500 mt-3 uppercase tracking-widest"></p>
+      </div>
+
+      <!-- Pointer to supplementary PDF for more figures -->
+      <p class="mt-14 text-center text-sm text-slate-500">
+        More qualitative examples and ablations are available in the
+        <a href="static/pdfs/TIE_supplementary.pdf" target="_blank" rel="noopener"
+           class="text-indigo-700 font-medium hover:underline">supplementary PDF</a>.
+      </p>
+
+    </div>
+  </section>
+
+  <!-- ===== BibTeX ===== -->
+  <section id="bibtex" class="relative py-20 border-t border-slate-200/70">
+    <div class="absolute inset-x-0 top-0 h-px divider-glow"></div>
+    <div class="max-w-4xl mx-auto px-6">
+      <div class="text-center mb-10">
+        <span class="pill bg-indigo-50 text-indigo-700 border border-indigo-100">Cite</span>
+        <h2 class="mt-4 text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">BibTeX</h2>
+      </div>
+
+      <div class="relative">
+        <button onclick="copyBibtex()" id="copyBtn"
+                class="absolute right-3 top-3 btn-ghost text-xs font-medium px-2.5 py-1 rounded-md">
+          Copy
+        </button>
+<pre class="code" id="bibtex"><code>@inproceedings{hong2027tie,
+  title     = {TIE: Training-free CLIP Embedding Guidance for
+               Compositional Text-to-Image Alignment},
+  author    = {Hong, Sujung and Choi, Ta Eun and Jun, Youngjun and
+               Yoon, Chanyong and Hwang, Seong Jae},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on
+               Applications of Computer Vision (WACV)},
+  year      = {2027}
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Footer ===== -->
+  <footer class="border-t border-slate-200/70 py-10 text-center text-xs text-slate-500">
+    <div class="max-w-5xl mx-auto px-6">
+      <p>
+        © 2027 &nbsp;·&nbsp; Project page for TIE.
+        Design adapted from academic project page conventions.
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    function copyBibtex() {
+      const text = document.getElementById('bibtex').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('copyBtn');
+        const prev = btn.innerText;
+        btn.innerText = 'Copied!';
+        setTimeout(() => btn.innerText = prev, 1500);
+      });
+    }
+
+    // Scroll reveal — only hide sections that are BELOW the current viewport,
+    // so direct anchor loads never leave upper sections stranded at opacity:0.
+    (function () {
+      if (!('IntersectionObserver' in window)) return;
+
+      const vh = window.innerHeight;
+      const targets = Array.from(document.querySelectorAll('section, footer'));
+
+      targets.forEach(el => {
+        const rect = el.getBoundingClientRect();
+        // if any part is already in-view or above, show immediately — do not hide
+        if (rect.top < vh * 0.9) return;
+        el.classList.add('js-reveal');
+      });
+
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.04, rootMargin: '0px 0px -5% 0px' });
+
+      document.querySelectorAll('.js-reveal').forEach(el => io.observe(el));
+
+      // Safety net: reveal anything still hidden after 1.2s
+      setTimeout(() => {
+        document.querySelectorAll('.js-reveal:not(.is-visible)')
+          .forEach(el => el.classList.add('is-visible'));
+      }, 1200);
+    })();
+
+    // Qualitative carousel
+    (function () {
+      const track = document.getElementById('qual-track');
+      const prev  = document.getElementById('qual-prev');
+      const next  = document.getElementById('qual-next');
+      const dotsWrap = document.getElementById('qual-dots');
+      const counter  = document.getElementById('qual-counter');
+      if (!track) return;
+
+      const total = track.children.length;
+      let idx = 0;
+
+      // build dots
+      for (let i = 0; i < total; i++) {
+        const d = document.createElement('button');
+        d.type = 'button';
+        d.className = 'qual-dot w-2.5 h-2.5 rounded-full bg-slate-300 hover:bg-slate-400 transition';
+        d.setAttribute('aria-label', `Slide ${i + 1}`);
+        d.addEventListener('click', () => { idx = i; render(); });
+        dotsWrap.appendChild(d);
+      }
+      const dots = dotsWrap.querySelectorAll('.qual-dot');
+
+      function render() {
+        track.style.transform = `translateX(-${idx * 100}%)`;
+        dots.forEach((d, i) => {
+          d.classList.toggle('bg-indigo-500', i === idx);
+          d.classList.toggle('bg-slate-300', i !== idx);
+          d.classList.toggle('w-6', i === idx);
+          d.classList.toggle('w-2.5', i !== idx);
+        });
+        if (counter) counter.textContent = `${idx + 1} / ${total}`;
+        prev.disabled = idx === 0;
+        next.disabled = idx === total - 1;
+      }
+
+      prev.addEventListener('click', () => { if (idx > 0) { idx--; render(); } });
+      next.addEventListener('click', () => { if (idx < total - 1) { idx++; render(); } });
+
+      document.addEventListener('keydown', (e) => {
+        const rect = track.getBoundingClientRect();
+        const inView = rect.top < window.innerHeight && rect.bottom > 0;
+        if (!inView) return;
+        if (e.key === 'ArrowLeft' && idx > 0) { idx--; render(); }
+        if (e.key === 'ArrowRight' && idx < total - 1) { idx++; render(); }
+      });
+
+      let startX = null;
+      track.addEventListener('touchstart', (e) => { startX = e.touches[0].clientX; }, { passive: true });
+      track.addEventListener('touchend', (e) => {
+        if (startX === null) return;
+        const dx = e.changedTouches[0].clientX - startX;
+        if (Math.abs(dx) > 40) {
+          if (dx < 0 && idx < total - 1) idx++;
+          if (dx > 0 && idx > 0) idx--;
+          render();
+        }
+        startX = null;
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
