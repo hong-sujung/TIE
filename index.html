@@ -823,20 +823,8 @@
         <h2 class="mt-4 text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">BibTeX</h2>
       </div>
 
-      <div class="relative">
-        <button onclick="copyBibtex()" id="copyBtn"
-                class="absolute right-3 top-3 btn-ghost text-xs font-medium px-2.5 py-1 rounded-md">
-          Copy
-        </button>
-<pre class="code" id="bibtex"><code>@inproceedings{hong2027tie,
-  title     = {TIE: Training-free CLIP Embedding Guidance for
-               Compositional Text-to-Image Alignment},
-  author    = {Hong, Sujung and Choi, Ta Eun and Jun, Youngjun and
-               Yoon, Chanyong and Hwang, Seong Jae},
-  booktitle = {Proceedings of the IEEE/CVF Winter Conference on
-               Applications of Computer Vision (WACV)},
-  year      = {2027}
-}</code></pre>
+      <div class="soft-card rounded-2xl p-10 text-center text-slate-500 text-sm">
+        BibTeX will be available soon.
       </div>
     </div>
   </section>
@@ -852,16 +840,6 @@
   </footer>
 
   <script>
-    function copyBibtex() {
-      const text = document.getElementById('bibtex').innerText;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = document.getElementById('copyBtn');
-        const prev = btn.innerText;
-        btn.innerText = 'Copied!';
-        setTimeout(() => btn.innerText = prev, 1500);
-      });
-    }
-
     // Scroll reveal — only hide sections that are BELOW the current viewport,
     // so direct anchor loads never leave upper sections stranded at opacity:0.
     (function () {
